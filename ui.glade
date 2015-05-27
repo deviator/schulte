@@ -197,14 +197,12 @@
               </packing>
             </child>
             <child>
-              <object class="GtkSpinButton" id="spinbtnsize">
+              <object class="GtkScale" id="scale1">
                 <property name="visible">True</property>
-                <property name="can_focus">False</property>
-                <property name="primary_icon_stock">gtk-zoom-fit</property>
+                <property name="can_focus">True</property>
                 <property name="adjustment">adjscale</property>
+                <property name="round_digits">2</property>
                 <property name="digits">2</property>
-                <property name="numeric">True</property>
-                <property name="value">1</property>
               </object>
               <packing>
                 <property name="expand">False</property>
