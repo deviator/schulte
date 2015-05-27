@@ -1,0 +1,11 @@
+*.a
+*.so
+*.o
+.*.sw*
+.dub
+bin
+lib
+*.def
+*.log
+*~
+dub.selections.json

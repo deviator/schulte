@@ -1,0 +1,9 @@
+{
+    "name": "schulte",
+    "targetPath": "bin",
+    "targetType": "executable",
+    "sourcePaths": [ "src" ],
+    "dependencies": {
+        "gtk-d": "~>3.1.3"
+    }
+}
