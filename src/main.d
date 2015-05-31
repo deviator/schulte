@@ -5,6 +5,7 @@ import std.math;
 import std.exception;
 import std.string;
 import std.datetime;
+import std.algorithm;
 
 import std.range : iota;
 import std.random : randomCover;
@@ -14,8 +15,10 @@ import gdk.RGBA;
 
 import cairo.Context;
 
+import gtk.Box;
 import gtk.Builder;
 import gtk.Button;
+import gtk.CheckButton;
 import gtk.ColorButton;
 import gtk.Main;
 import gtk.MainWindow;
@@ -25,10 +28,15 @@ import gtk.DrawingArea;
 import gtk.Action;
 import gtk.Adjustment;
 import gtk.Window;
+import gtk.ListStore;
+import gtk.TreeIter;
 import gtk.SpinButton;
 import gtk.Switch;
 import gtk.Style;
 import gtk.StyleContext;
+import gobject.Value;
+
+import des.log;
 
 class UIException : Exception
 {
@@ -157,18 +165,28 @@ private:
 
     void prepare()
     {
-        prepareMainWindow( obj!Window( "mwindow" ) );
+        prepareMainWindow();
         prepareTableSizeChange();
         prepareColorSelectors();
+        prepareShowParamsSwitch();
         prepareSquareSwitch();
         prepareCreateAction();
         prepareInitialTableSize();
-        prepareDrawAlgo();
+        prepareDrawingTable();
+        prepareShowingResults();
+        prepareDrawingResults();
     }
 
-    void prepareMainWindow( Window w )
+    void prepareMainWindow()
     {
+        auto w = obj!Window( "mwindow" );
         w.setTitle( "schulte tables" );
+        w.addOnKeyPress( ( GdkEventKey* key, Widget aux )
+        {
+            logger.Debug!"key press"( "key val: ", key.keyval );
+            if( key.keyval == 32 ) updateTable();
+            return true;
+        });
         w.addOnHide( (Widget aux){ Main.quit(); } );
         w.showAll();
     }
@@ -177,25 +195,20 @@ private:
     {
         obj!Adjustment( "adjwidth" ).addOnValueChanged( (Adjustment aux)
         {
-            table.width = cast(int)aux.getValue();
-            if( use_square )
-                table.height = cast(int)aux.getValue();
-
-            updateTable();
+            logger.Debug!"adjwidth.valueChanged"( cast(int)aux.getValue() );
+            updateTableSize();
         });
 
         obj!Adjustment( "adjheight" ).addOnValueChanged( (Adjustment aux)
         {
-            if( !use_square )
-            {
-                table.height = cast(int)aux.getValue();
-                updateTable();
-            }
+            logger.Debug!"adjheight.valueChanged"( cast(int)aux.getValue() );
+            updateTableSize();
         });
 
         obj!Adjustment( "adjscale" ).addOnValueChanged( (Adjustment aux)
         {
             scale = aux.getValue();
+            logger.Debug!"adjscale.valueChanged"( scale );
             redrawTable();
         });
     }
@@ -205,13 +218,25 @@ private:
         obj!ColorButton( "colorbtnbackground" ).addOnColorSet( (aux)
         {
             aux.getColor( bg_color );
+            logger.Debug!"colorbtnbackground.colorSet"( bg_color );
             redrawTable();
         });
 
         obj!ColorButton( "colorbtnforeground" ).addOnColorSet( (aux)
         {
             aux.getColor( fg_color );
+            logger.Debug!"colorbtnforeground.colorSet"( fg_color );
             redrawTable();
+        });
+    }
+
+    void prepareShowParamsSwitch()
+    {
+        obj!CheckButton( "showparamscheck" ).addOnToggled( (aux)
+        {
+            bool val = aux.getActive();
+            logger.Debug!"showparamscheck.toggled"( val );
+            obj!Box( "parambox" ).setVisible( val );
         });
     }
 
@@ -220,8 +245,14 @@ private:
         obj!Switch( "squareswitch" ).addOnStateSet( (val,aux)
         {
             use_square = val;
+            logger.Debug!"squareswitch.stateSet"( val );
             obj!SpinButton( "spinbtnheight" ).setVisible( !val );
-            updateTable();
+
+            if( use_square )
+                obj!Adjustment( "adjheight" ).setValue( obj!Adjustment( "adjwidth" ).getValue() );
+
+            updateTableSize();
+
             return false;
         });
     }
@@ -233,19 +264,11 @@ private:
 
     void prepareInitialTableSize()
     {
-        auto aw = obj!Adjustment( "adjwidth" );
-        auto ah = obj!Adjustment( "adjheight" );
-
-        table.width = cast(int)aw.getValue();
-        if( use_square )
-            table.height = cast(int)aw.getValue();
-        else
-            table.height = cast(int)ah.getValue();
-
-        updateTable();
+        setTableSizeFromWidgets();
+        firstUpdateTable();
     }
 
-    void prepareDrawAlgo()
+    void prepareDrawingTable()
     {
         obj!DrawingArea( "drawingarea" ).addOnDraw( (Scoped!Context cr, Widget aux)
         {
@@ -304,7 +327,7 @@ private:
                     cr.textExtents( tv.value, &te );
 
                     auto x = ( w - dw + cell_size ) / 2 + cell_size * i - te.width / 2;
-                    auto y = ( h - dh + cell_size ) / 2 + cell_size * j + font_size / 2;
+                    auto y = ( h - dh + cell_size ) / 2 + cell_size * j + te.height / 2;
 
                     cr.moveTo( cast(int)x, cast(int)y );
                     cr.showText( tv.value );
@@ -314,15 +337,175 @@ private:
         });
     }
 
+    void prepareShowingResults()
+    {
+        auto w = obj!Window( "resultwindow" );
+
+        obj!Action( "actionshowresults" ).addOnActivate( (aux)
+        {
+            if( w.isVisible() )
+            {
+                w.hide();
+                aux.setLabel( "show results" );
+            }
+            else
+            {
+                w.showAll();
+                aux.setLabel( "hide results" );
+            }
+        });
+
+        w.setTitle( "results" );
+        w.addOnShow( (aux)
+        {
+            obj!Label( "resultlabel" ).setLabel(
+                    format( "for table %dx%d", table.width, table.height ) );
+        });
+        w.addOnDelete( (ev, aux) { w.hide(); return true; });
+    }
+
+    void prepareDrawingResults()
+    {
+        obj!DrawingArea( "resultdraw" ).addOnDraw( (Scoped!Context cr, Widget aux)
+        {
+            float line_width = 2;
+            float margin = line_width * 2;
+            float font_size = 14;
+
+            float max_time = reduce!max( 0.0f, times );
+            size_t cnt = times.length;
+
+            auto w = aux.getAllocatedWidth();
+            auto h = aux.getAllocatedHeight();
+
+            cr.setFontSize( font_size );
+            cr.setLineWidth( line_width );
+
+            cr.setSourceRgb( 255, 255, 255 );
+
+            float max_time_in_pixel = h - margin * 2 - font_size * 2;
+            float cnt_in_pixel = w - font_size * 3;
+
+            float origin_x = font_size * 2;
+            float origin_y = h - margin - font_size * 2;
+
+            cr.moveTo( origin_x, origin_y - max_time_in_pixel );
+            cr.lineTo( origin_x, origin_y );
+
+            cr.moveTo( origin_x, origin_y );
+            cr.lineTo( origin_x + cnt_in_pixel, origin_y );
+
+            cr.stroke();
+
+            float dx = cnt_in_pixel / cnt;
+            float start_x_offset = dx * 0.5;
+            auto lw = line_width;
+
+            cr.save();
+            {
+                cr.setSourceRgb( 255, 255, 255 );
+                cr.setLineWidth( 1 );
+                foreach( i; 0 .. cnt )
+                {
+                    auto x = origin_x + dx * i + start_x_offset;
+                    cr.moveTo( x, origin_y + font_size * 0.3 );
+                    cr.lineTo( x, origin_y - max_time_in_pixel );
+                }
+                cr.stroke();
+            }
+            cr.restore();
+
+            cr.setSourceRgb( 255, 0, 0 );
+
+            float last_x = float.nan, last_y;
+
+            foreach( i; 0 .. cnt )
+            {
+                auto x = origin_x + dx * i + start_x_offset;
+                auto y = origin_y - max_time_in_pixel * ( times[i] / max_time );
+                cr.rectangle( x-lw, y-lw, lw*2, lw*2 );
+
+                if( last_x !is float.nan )
+                {
+                    cr.moveTo( last_x, last_y );
+                    cr.lineTo( x, y );
+                }
+
+                last_x = x;
+                last_y = y;
+            }
+
+            //cr.fill();
+            cr.stroke();
+
+            cairo_text_extents_t te;
+
+            cr.setSourceRgb( 255, 255, 255 );
+
+            foreach( i; 0 .. cnt )
+            {
+                string text = format( "%d", i+1 );
+
+                auto x = origin_x + dx * i + start_x_offset;
+                auto y = origin_y + font_size * 1.5;
+
+                cr.textExtents( text, &te );
+                cr.moveTo( x - te.width/2, y );
+                cr.showText( text );
+            }
+
+            return false;
+        });
+
+    }
+
+    void showResultWindow()
+    {
+        obj!Window( "resultwindow" ).showAll();
+    }
+
     void updateTable()
     {
         updateTime( getElapsedTime() );
 
         table.update();
         redrawTable();
+
+        logger.Debug( "pass" );
+    }
+
+    void updateTableSize()
+    {
+        times = [];
+
+        setTableSizeFromWidgets();
+
+        updateTable();
+    }
+
+    void setTableSizeFromWidgets()
+    {
+        auto aw = obj!Adjustment( "adjwidth" );
+        auto ah = obj!Adjustment( "adjheight" );
+
+        table.width = cast(int)aw.getValue();
+        if( use_square )
+            table.height = cast(int)aw.getValue();
+        else
+            table.height = cast(int)ah.getValue();
+
+        logger.Debug( "%dx%d", table.width, table.height );
     }
 
     StopWatch sw;
+
+    void firstUpdateTable()
+    {
+        sw.start();
+
+        table.update();
+        redrawTable();
+    }
 
     float getElapsedTime()
     {
@@ -335,13 +518,29 @@ private:
 
     void updateTime( float time )
     {
-        writefln( "update timeout % 6.2f sec", time );
-        obj!Label( "labelmsg" ).setLabel( format( "% 6.2f sec", time ) );
+        logger.info( "update timeout % 6.2f sec", time );
 
-        // TODO: log results
+        obj!Label( "labelmsg" ).setLabel( format( "time: % 6.2f sec", time ) );
+
+        appendTimeToResultList( time );
+        setResultListWidgetValues();
+        redrawResults();
     }
 
+    void setResultListWidgetValues()
+    {
+        auto rl = obj!ListStore( "resultlist" );
+        rl.clear();
+        foreach( tt; times )
+            rl.setValue( rl.createIter(), 0, new Value( tt ) );
+    }
+
+    float[] times;
+
+    void appendTimeToResultList( float time ) { times ~= time; }
+
     void redrawTable() { obj!DrawingArea( "drawingarea" ).queueDraw(); }
+    void redrawResults() { obj!DrawingArea( "resultdraw" ).queueDraw(); }
 
     auto obj(T)( string name )
     {
