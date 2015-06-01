@@ -39,10 +39,13 @@ public:
         float scale() const { return m_scale; }
     }
 
-    void draw( Scoped!Context cr, int w, int h )
+    bool draw( Scoped!Context cr, Widget aux )
     {
         float line_width = 2;
         float margin = line_width * 2;
+
+        auto w = aux.getAllocatedWidth();
+        auto h = aux.getAllocatedHeight();
 
         float widget_aspect = cast(float)w / h;
         float table_aspect = cast(float)table.width / table.height;
@@ -109,5 +112,7 @@ public:
             cr.arc( w/2, h/2, line_width*2, 0, 3.1415*2 );
             cr.fill();
         }
+
+        return false;
     }
 }

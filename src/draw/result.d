@@ -10,6 +10,7 @@ import draw.iface;
 import table;
 
 import cairo.Context;
+import gtk.Widget;
 
 struct RColor { float r=.0f, g=.0f, b=.0f; }
 
@@ -32,12 +33,15 @@ public:
         mclr2 = RColor(0,1,1);
     }
 
-    void draw( Scoped!Context cr, int w, int h )
+    bool draw( Scoped!Context cr, Widget aux )
     {
         float line_width = 2;
         float margin = line_width * 2;
         float font_size = 14;
         float margin_left = font_size * 4;
+
+        auto w = aux.getAllocatedWidth();
+        auto h = aux.getAllocatedHeight();
 
         float max_time = reduce!max( 0.0f, table.results );
         size_t cnt = table.results.length;
@@ -170,5 +174,7 @@ public:
             cr.moveTo( x - te.width/2, y );
             cr.showText( text );
         }
+
+        return false;
     }
 }

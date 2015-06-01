@@ -186,7 +186,7 @@ private:
 
     void prepareDrawingTable()
     {
-        drawAssist( obj!DrawingArea( "drawingarea" ), table_drawer );
+        obj!DrawingArea( "drawingarea" ).addOnDraw( &table_drawer.draw );
     }
 
     void prepareShowingResults()
@@ -218,7 +218,7 @@ private:
 
     void prepareDrawingResults()
     {
-        drawAssist( obj!DrawingArea( "resultdraw" ), result_drawer );
+        obj!DrawingArea( "resultdraw" ).addOnDraw( &result_drawer.draw );
     }
 
     void updateTable()
